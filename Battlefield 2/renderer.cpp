@@ -15,6 +15,7 @@
 #include "lesson.h"
 
 using lesson::Vec3;
+using lesson::dot;
 namespace {
 
 constexpr float PI = 3.14159265358979323846f;
@@ -29,15 +30,18 @@ const COLORREF GREEN = RGB(112, 220, 157);
 const COLORREF PURPLE = RGB(181, 153, 246);
 
 enum Control { Walk = 101, Reset, Normalize, Copy, Basis, Slower, Faster,
-               Smaller, Bigger, Camera, Source };
+               Smaller, Bigger, Camera, Source, MovementLesson, VisionLesson,
+               LookLeft, LookRight, Narrower, Wider, Nearer, Farther, FocusFlag,
+               FollowLook, ControlCount };
 
 lesson::World world;
 HWND windowHandle = nullptr;
-std::array<HWND, 11> controls{};
+std::array<HWND, ControlCount-101> controls{};
 HFONT bodyFont, titleFont, monoFont, smallFont;
 HBRUSH panelBrush;
 int width = 1280, height = 800, viewWidth = 922;
 bool showBasis = false, paused = false;
+bool visionLesson = true;
 float cameraYaw = .65f, cameraZoom = 1.0f;
 float frameSeconds = 1.0f / 60.0f;
 
@@ -48,7 +52,6 @@ std::vector<Face> faces;
 Vec3 add(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 subtract(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 Vec3 scaled(Vec3 a, float s) { return {a.x * s, a.y * s, a.z * s}; }
-float dot(Vec3 a, Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 
 void rectangle(HDC dc, int x, int y, int w, int h, COLORREF color)
 {
@@ -188,22 +191,45 @@ void label3(HDC dc, Vec3 position, const std::wstring& label, COLORREF color)
     if (project(position, p)) text(dc, p.x + 10, p.y - 10, label, color, smallFont);
 }
 
+std::vector<Vec3> viewSector()
+{
+    const float heading=std::atan2(world.forward.x,world.forward.z);
+    const float halfAngle=world.viewAngleDegrees*PI/360;
+    std::vector<Vec3> points{{world.player.x,.03f,world.player.z}};
+    for(int i=0;i<=48;++i)
+    {
+        const float angle=heading-halfAngle+2*halfAngle*i/48;
+        points.push_back({world.player.x+std::sin(angle)*world.viewDistance,.03f,
+                          world.player.z+std::cos(angle)*world.viewDistance});
+    }
+    return points;
+}
+
 void drawWorld(HDC dc)
 {
     prepareCamera();
     rectangle(dc, 0, 0, viewWidth, height, BACK);
     polygon3(dc, {{-17,0,-17},{17,0,-17},{17,0,17},{-17,0,17}}, RGB(28,44,47), RGB(42,63,65));
 
-    const bool inside = lesson::inCaptureRadius(world);
-    std::vector<Vec3> ring;
-    for (int i = 0; i < 96; ++i)
+    const lesson::Sight sight=lesson::sightToFlag(world);
+    std::vector<Vec3> sector;
+    if(visionLesson)
     {
-        float angle = 2*PI*i/96;
-        ring.push_back({world.flag.x + std::cos(angle)*world.captureRadius, .015f,
-                        world.flag.z + std::sin(angle)*world.captureRadius});
+        sector=viewSector();
+        polygon3(dc,sector,RGB(26,63,65),RGB(43,115,121));
     }
-    polygon3(dc, ring, inside ? RGB(29,65,57) : RGB(62,56,43), inside ? GREEN : ORANGE);
-
+    else
+    {
+        const bool inside=lesson::inCaptureRadius(world);
+        std::vector<Vec3> ring;
+        for(int i=0;i<96;++i)
+        {
+            float angle=2*PI*i/96;
+            ring.push_back({world.flag.x+std::cos(angle)*world.captureRadius,.015f,
+                            world.flag.z+std::sin(angle)*world.captureRadius});
+        }
+        polygon3(dc,ring,inside?RGB(29,65,57):RGB(62,56,43),inside?GREEN:ORANGE);
+    }
     for (int i = -12; i <= 12; ++i)
     {
         COLORREF color = i%5 == 0 ? RGB(64,86,90) : RGB(42,62,65);
@@ -220,6 +246,12 @@ void drawWorld(HDC dc)
     label3(dc, {12.3f,.1f,0}, L"+X", RGB(218,151,145));
     label3(dc, {0,.1f,12.3f}, L"+Z", RGB(137,185,233));
 
+    if(visionLesson)
+    {
+        for(size_t i=1;i<sector.size();++i)line3(dc,sector[i-1],sector[i],CYAN,2);
+        line3(dc,sector.back(),sector.front(),CYAN,2);
+    }
+
     faces.clear();
     box({-9,1.0f,-7}, {2.4f,2,2.4f}, RGB(97,115,123));
     box({-6,.55f,-8}, {1.6f,1.1f,1.6f}, RGB(110,126,115));
@@ -232,11 +264,12 @@ void drawWorld(HDC dc)
     std::sort(faces.begin(), faces.end(), [](const Face& a,const Face& b){return a.depth > b.depth;});
     for (const Face& face : faces) polygon3(dc, face.points, face.color, shade(face.color,.72f));
 
+    const COLORREF flagColor=visionLesson&&sight.inSector?GREEN:ORANGE;
     line3(dc, add(world.flag,{0,.2f,0}), add(world.flag,{0,3,0}), RGB(214,220,216), 3);
     polygon3(dc, {add(world.flag,{0,3,0}),add(world.flag,{1.35f,2.8f,0}),
-                  add(world.flag,{1.35f,2.1f,0}),add(world.flag,{0,2.3f,0})}, ORANGE, shade(ORANGE,.8f));
-    line3(dc, add(world.player,{0,.08f,0}), add(world.flag,{0,.08f,0}), ORANGE, 1, true);
-    label3(dc, add(world.flag,{0,3.5f,0}), L"ФЛАГ", ORANGE);
+                  add(world.flag,{1.35f,2.1f,0}),add(world.flag,{0,2.3f,0})}, flagColor, shade(flagColor,.8f));
+    line3(dc, add(world.player,{0,.08f,0}), add(world.flag,{0,.08f,0}), flagColor, 1, true);
+    label3(dc, add(world.flag,{0,3.5f,0}), L"ФЛАГ", flagColor);
     label3(dc, add(world.player,{0,1.9f,0}), L"ИГРОК", CYAN);
 
     if (showBasis)
@@ -252,13 +285,16 @@ void drawWorld(HDC dc)
     {
         Vec3 base = add(world.player,{0,.7f,0});
         arrow(dc,base,add(base,scaled(world.velocity,.85f)),GREEN,L"velocity");
+        if(visionLesson)arrow(dc,base,add(base,scaled(world.forward,3)),PURPLE,L"forward");
     }
 
     text(dc,22,20,L"ПОЛИГОН ВЕКТОРОВ",TEXT,titleFont);
-    text(dc,22,53,L"C++  /  Vec3 из OpenBF2  /  1 клетка = 1 метр",MUTED,smallFont);
+    text(dc,22,53,visionLesson?L"УРОК 2  /  dot и поле зрения  /  1 клетка = 1 метр":
+        L"УРОК 1  /  движение и нормализация  /  Vec3 из OpenBF2",MUTED,smallFont);
     rectangle(dc,16,height-76,viewWidth-32,60,RGB(18,30,40));
-    text(dc,28,height-66,L"WASD / стрелки — движение     G — к флагу     Space — пауза",TEXT,smallFont);
-    text(dc,28,height-42,L"Мышь: правая кнопка — поворот камеры, колесо — масштаб     R — сброс",MUTED,smallFont);
+    text(dc,28,height-66,visionLesson?L"WASD — движение     Q/E — взгляд ±15°     F — смотреть на флаг":
+        L"WASD / стрелки — движение     G — к флагу     Space — пауза",TEXT,smallFont);
+    text(dc,28,height-42,L"1/2 — урок     Space — пауза     R — сброс     ПКМ / колесо — камера",MUTED,smallFont);
     if (paused) text(dc,22,86,L"ПАУЗА",ORANGE);
 }
 
@@ -267,14 +303,35 @@ void drawPanel(HDC dc)
     const int x = viewWidth + 22;
     rectangle(dc,viewWidth,0,PANEL,height,SURFACE);
     text(dc,x,22,L"Векторы в реальном времени",TEXT,titleFont);
-    text(dc,x,53,L"Положение, направление, скорость",MUTED,smallFont);
+    text(dc,x,53,visionLesson?L"Направление взгляда и сектор обзора":L"Положение, направление, скорость",MUTED,smallFont);
+    if(visionLesson)
+    {
+        const lesson::Sight sight=lesson::sightToFlag(world);
+        const wchar_t* labels[]={L"player.position  /  м",L"forward  /  направление взгляда",L"directionToFlag  /  нормализован"};
+        Vec3 values[]={world.player,world.forward,sight.directionToFlag};
+        for(int i=0;i<3;++i)
+        {
+            text(dc,x,120+i*44,labels[i],MUTED,smallFont);
+            text(dc,x,140+i*44,vectorText(values[i]),TEXT,monoFont);
+        }
+        text(dc,x,270,sight.directionDefined?L"dot = "+number(sight.alignment,3)+L"   угол "+number(sight.angleDegrees,1)+L"°":
+            L"dot: направление не определено",TEXT);
+        text(dc,x,300,L"Порог cos("+number(world.viewAngleDegrees*.5f,0)+L"°) = "+number(sight.threshold,3),MUTED,smallFont);
+        text(dc,x,335,!sight.directionDefined?L"ИГРОК В ТОЧКЕ ФЛАГА":
+            (sight.inSector?L"ФЛАГ В СЕКТОРЕ":L"ФЛАГ ВНЕ СЕКТОРА"),sight.inSector?GREEN:ORANGE,smallFont);
+        text(dc,x,464,L"Сектор: "+number(world.viewAngleDegrees,0)+L"°",TEXT);
+        text(dc,x,516,L"Дальность: "+number(world.viewDistance,0)+L" м",TEXT);
+        text(dc,x,539,L"До флага: "+number(lesson::distanceToFlag(world))+L" м",MUTED,smallFont);
+        text(dc,x,681,L"dot = forward · direction",MUTED,monoFont);
+        return;
+    }
     const wchar_t* labels[] = {L"player.position  /  м", L"flag.position  /  м",
         L"direction  /  вектор для движения", L"velocity  /  м/с"};
     Vec3 values[] = {world.player,world.flag,world.direction,world.velocity};
     for (int i=0;i<4;++i)
     {
-        text(dc,x,85+i*54,labels[i],MUTED,smallFont);
-        text(dc,x,105+i*54,vectorText(values[i]),TEXT,monoFont);
+        text(dc,x,120+i*44,labels[i],MUTED,smallFont);
+        text(dc,x,140+i*44,vectorText(values[i]),TEXT,monoFont);
     }
     text(dc,x,309,L"До флага: "+number(lesson::distanceToFlag(world))+L" м",TEXT,titleFont);
     text(dc,x,340,lesson::inCaptureRadius(world) ? L"В РАДИУСЕ ЗАХВАТА" : L"ВНЕ РАДИУСА ЗАХВАТА",
@@ -310,6 +367,7 @@ void updateLabels()
     SetWindowTextW(controls[Normalize-101],world.normalizeInput ? L"[x] Нормализовать ввод [N]" : L"[ ] Нормализовать ввод [N]");
     SetWindowTextW(controls[Copy-101],world.passByValue ? L"[x] Передать копию [C]" : L"[ ] Передать копию [C]");
     SetWindowTextW(controls[Basis-101],showBasis ? L"[x] Три оси объекта [B]" : L"[ ] Три оси объекта [B]");
+    SetWindowTextW(controls[FollowLook-101],world.followMovement?L"[x] Взгляд вслед движению [V]":L"[ ] Взгляд вслед движению [V]");
     for(HWND control:controls) InvalidateRect(control,nullptr,FALSE);
 }
 
@@ -320,13 +378,27 @@ void arrangeControls()
     MoveWindow(controls[Reset-101],x+162,374,150,32,TRUE);
     MoveWindow(controls[Normalize-101],x,418,312,27,TRUE);
     MoveWindow(controls[Copy-101],x,450,312,27,TRUE);
-    MoveWindow(controls[Basis-101],x,482,312,27,TRUE);
+    MoveWindow(controls[Basis-101],x,visionLesson?644:482,312,27,TRUE);
     MoveWindow(controls[Slower-101],x+226,517,38,36,TRUE);
     MoveWindow(controls[Faster-101],x+274,517,38,36,TRUE);
     MoveWindow(controls[Smaller-101],x+226,576,38,36,TRUE);
     MoveWindow(controls[Bigger-101],x+274,576,38,36,TRUE);
-    MoveWindow(controls[Camera-101],x,702,150,32,TRUE);
-    MoveWindow(controls[Source-101],x+162,702,150,32,TRUE);
+    MoveWindow(controls[Camera-101],x,714,150,32,TRUE);
+    MoveWindow(controls[Source-101],x+162,714,150,32,TRUE);
+    MoveWindow(controls[MovementLesson-101],x,80,150,28,TRUE);
+    MoveWindow(controls[VisionLesson-101],x+162,80,150,28,TRUE);
+    MoveWindow(controls[LookLeft-101],x,418,150,32,TRUE);
+    MoveWindow(controls[LookRight-101],x+162,418,150,32,TRUE);
+    MoveWindow(controls[Narrower-101],x+226,458,38,36,TRUE);
+    MoveWindow(controls[Wider-101],x+274,458,38,36,TRUE);
+    MoveWindow(controls[Nearer-101],x+226,512,38,36,TRUE);
+    MoveWindow(controls[Farther-101],x+274,512,38,36,TRUE);
+    MoveWindow(controls[FocusFlag-101],x,560,312,32,TRUE);
+    MoveWindow(controls[FollowLook-101],x,602,312,27,TRUE);
+    for(int id:{Normalize,Copy,Slower,Faster,Smaller,Bigger})
+        ShowWindow(controls[id-101],visionLesson?SW_HIDE:SW_SHOWNA);
+    for(int id:{LookLeft,LookRight,Narrower,Wider,Nearer,Farther,FocusFlag,FollowLook})
+        ShowWindow(controls[id-101],visionLesson?SW_SHOWNA:SW_HIDE);
 }
 
 void command(int id)
@@ -334,7 +406,7 @@ void command(int id)
     switch(id)
     {
     case Walk: world.autoWalk = !world.autoWalk; break;
-    case Reset: world = lesson::World{}; paused=false; break;
+    case Reset: world=lesson::World{};world.followMovement=!visionLesson;paused=false;break;
     case Normalize: world.normalizeInput = !world.normalizeInput; break;
     case Copy: world.passByValue = !world.passByValue; break;
     case Basis: showBasis = !showBasis; break;
@@ -343,6 +415,16 @@ void command(int id)
     case Smaller: world.captureRadius=std::max(.5f,world.captureRadius-.5f); break;
     case Bigger: world.captureRadius=std::min(8.0f,world.captureRadius+.5f); break;
     case Camera: cameraYaw=.65f;cameraZoom=1;break;
+    case MovementLesson:visionLesson=false;world.followMovement=true;break;
+    case VisionLesson:visionLesson=true;world.followMovement=false;break;
+    case LookLeft:lesson::rotateLook(world,-15);break;
+    case LookRight:lesson::rotateLook(world,15);break;
+    case Narrower:world.viewAngleDegrees=std::max(30.0f,world.viewAngleDegrees-15);break;
+    case Wider:world.viewAngleDegrees=std::min(180.0f,world.viewAngleDegrees+15);break;
+    case Nearer:world.viewDistance=std::max(1.0f,world.viewDistance-1);break;
+    case Farther:world.viewDistance=std::min(15.0f,world.viewDistance+1);break;
+    case FocusFlag:lesson::lookAtFlag(world);break;
+    case FollowLook:world.followMovement=!world.followMovement;break;
     case Source:
     {
         wchar_t path[MAX_PATH];
@@ -354,6 +436,7 @@ void command(int id)
     }
     }
     updateLabels();
+    arrangeControls();
     SetFocus(windowHandle);
     InvalidateRect(windowHandle,nullptr,FALSE);
 }
@@ -365,8 +448,9 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
     case WM_CREATE:
     {
         windowHandle=hwnd;
-        const wchar_t* captions[] = {L"К флагу [G]",L"Сброс [R]",L"",L"",L"",L"−",L"+",L"−",L"+",L"Камера",L"Код [F2]"};
-        for(int i=0;i<11;++i)
+        const wchar_t* captions[] = {L"К флагу [G]",L"Сброс [R]",L"",L"",L"",L"−",L"+",L"−",L"+",L"Камера",L"Код [F2]",
+            L"Движение [1]",L"Поле зрения [2]",L"← Взгляд [Q]",L"Взгляд [E] →",L"−",L"+",L"−",L"+",L"Смотреть на флаг [F]",L""};
+        for(int i=0;i<ControlCount-101;++i)
         {
             controls[i]=CreateWindowW(L"BUTTON",captions[i],WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,
                 0,0,10,10,hwnd,reinterpret_cast<HMENU>(static_cast<INT_PTR>(101+i)),nullptr,nullptr);
@@ -391,7 +475,9 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         auto item=reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         const bool selected=(item->itemState&ODS_SELECTED)!=0;
         bool enabled=(item->CtlID==Normalize&&world.normalizeInput)||(item->CtlID==Copy&&world.passByValue)
-                    ||(item->CtlID==Basis&&showBasis)||(item->CtlID==Walk&&world.autoWalk);
+                    ||(item->CtlID==Basis&&showBasis)||(item->CtlID==Walk&&world.autoWalk)
+                    ||(item->CtlID==FollowLook&&world.followMovement)
+                    ||(item->CtlID==MovementLesson&&!visionLesson)||(item->CtlID==VisionLesson&&visionLesson);
         COLORREF bg=selected?RGB(57,78,91):(enabled?RGB(42,75,85):RGB(35,51,65));
         rectangle(item->hDC,0,0,item->rcItem.right,item->rcItem.bottom,bg);
         wchar_t label[128];GetWindowTextW(item->hwndItem,label,128);
@@ -407,6 +493,11 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         case 'G':command(Walk);break;case 'R':command(Reset);break;
         case 'N':command(Normalize);break;case 'C':command(Copy);break;
         case 'B':command(Basis);break;case VK_F2:command(Source);break;
+        case '1':command(MovementLesson);break;case '2':command(VisionLesson);break;
+        case 'Q':if(visionLesson)command(LookLeft);break;
+        case 'E':if(visionLesson)command(LookRight);break;
+        case 'F':if(visionLesson)command(FocusFlag);break;
+        case 'V':if(visionLesson)command(FollowLook);break;
         case VK_SPACE:paused=!paused;break;
         case VK_ESCAPE:PostMessage(hwnd,WM_CLOSE,0,0);break;
         }return 0;
