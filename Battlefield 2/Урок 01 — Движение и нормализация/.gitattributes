@@ -1,0 +1,8 @@
+*.cpp text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.cmd text eol=crlf
+*.exe binary
+# Preserve the original snapshot byte-for-byte so SOURCE.md hashes remain valid.
+original/* -text
+LICENSE -text

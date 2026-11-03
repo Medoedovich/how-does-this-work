@@ -1,0 +1,11 @@
+# Compiler and IDE output. The two small ready-to-run executables are included.
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.pch
+*.exp
+*.lib
+.vs/
+build/
+out/

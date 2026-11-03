@@ -4,5 +4,8 @@
 *.cmd text eol=crlf
 *.exe binary
 # Preserve the original snapshot byte-for-byte so SOURCE.md hashes remain valid.
-original/* -text
+**/original/* -text
 LICENSE -text
+# Preserve CRLF for the UTF-8 launchers, including downloads as GitHub ZIPs.
+/build.cmd -text whitespace=cr-at-eol
+/run.cmd -text whitespace=cr-at-eol

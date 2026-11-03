@@ -1,9 +1,3 @@
 @echo off
-if not exist "%~dp0VectorLab.exe" (
-    call "%~dp0build.cmd"
-    if errorlevel 1 (
-        pause
-        exit /b 1
-    )
-)
-start "" "%~dp0VectorLab.exe"
+chcp 65001 >nul
+call "%~dp0Урок 02 — Dot и поле зрения\run.cmd"
