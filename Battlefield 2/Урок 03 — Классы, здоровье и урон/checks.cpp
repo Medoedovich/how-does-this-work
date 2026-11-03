@@ -1,0 +1,125 @@
+#include "lesson.h"
+#include <iostream>
+
+int main()
+{
+    int failed = 0;
+    int count = 0;
+    auto near = [](float a, float b) { return std::fabs(a - b) < 0.0001f; };
+    auto check = [&](bool condition, const char* name) {
+        ++count;
+        if (!condition) ++failed;
+        std::cout << (condition ? "PASS " : "FAIL ") << name << '\n';
+    };
+    using namespace lesson;
+    World world;
+    check(near(distanceToTarget(world), 5), "original distXZSqr: 3-4-5 distance");
+    check(!inCaptureRadius(world), "five metres is outside four metre radius");
+    world.captureRadius = 5;
+    check(inCaptureRadius(world), "capture includes the radius boundary");
+    Vec3 vector{6, 0, 8};
+    check(normalizeCopy(vector) && near(vector.x, 6) && near(vector.z, 8), "pass by value preserves caller");
+    check(normalize(vector) && near(vector.x, .6f) && near(vector.z, .8f), "pass by reference changes caller");
+    Vec3 zero = Vec3::getZero();
+    check(!normalize(zero) && near(zero.x, 0), "zero direction cannot be normalized");
+    world = World{};
+    updatePlayer(world, 1, 1, .5f);
+    check(near(actualSpeed(world), 2), "normalized diagonal keeps chosen speed");
+    check(near(world.player.x, 1 + std::sqrt(.5f)) && near(world.player.z, 2 + std::sqrt(.5f)), "position changes by velocity times dt");
+    world = World{};
+    world.passByValue = true;
+    updatePlayer(world, 1, 1, .5f);
+    check(near(actualSpeed(world), std::sqrt(8.0f)), "copy experiment exposes faster diagonal");
+    world = World{};
+    world.autoWalk = true;
+    updatePlayer(world, 0, 0, .5f);
+    check(near(world.player.x, 1.6f) && near(world.player.z, 2.8f), "auto walk follows normalized target direction");
+    for (int i = 0; i < 100; ++i) updatePlayer(world, 0, 0, .1f);
+    check(near(distanceToTarget(world), 0) && !world.autoWalk && near(actualSpeed(world), 0), "auto walk stops at flag without overshoot");
+    world = World{};
+    world.player = {12, 0, 12};
+    updatePlayer(world, 1, 1, 1);
+    check(near(world.player.x, 12) && near(world.player.z, 12), "practice ground bounds are respected");
+    check(near(actualSpeed(world), 0), "blocked movement reports zero actual speed");
+    Vec3 forward{2, 0, 0}, up{1, 3, 0}, third{};
+    const int result = third.makeOrthonormalBasis(forward, up);
+    check(result == 0 && near(forward.x, 1) && near(up.y, 1) && near(third.z, 1), "original makeOrthonormalBasis builds orthogonal unit axes");
+    Vec3 parallelA{1, 0, 0}, parallelB{2, 0, 0};
+    check(third.makeOrthonormalBasis(parallelA, parallelB) == -20003, "original basis reports parallel directions");
+    Vec3 point{3, 999, 4}, origin{};
+    check(near(dice::hfe::distXZSqr(point, origin), 25), "original XZ distance ignores height");
+    check(near(dot(Vec3{0,0,1},Vec3{0,0,1}),1), "dot: matching directions");
+    check(near(dot(Vec3{0,0,1},Vec3{1,0,0}),0), "dot: perpendicular directions");
+    check(near(dot(Vec3{0,0,1},Vec3{0,0,-1}),-1), "dot: opposite directions");
+    world = World{};
+    Sight sight = sightToTarget(world);
+    check(sight.inSector && near(sight.alignment,.8f), "initial flag is inside 90 degree sector with dot 0.8");
+    check(near(sight.angleDegrees,36.8699f), "dot gives the angle to the flag");
+    rotateLook(world,-15);
+    sight = sightToTarget(world);
+    check(!sight.withinAngle && sight.withinRange && !sight.inSector, "turning left moves the flag outside the sector");
+    check(lookAtTarget(world) && near(sightToTarget(world).alignment,1), "look at flag aligns the direction");
+    world.viewDistance=4;
+    sight = sightToTarget(world);
+    check(sight.withinAngle && !sight.withinRange && !sight.inSector, "angle alone does not bypass view distance");
+    world.viewDistance=5;
+    check(sightToTarget(world).inSector, "view distance includes its boundary");
+    world=World{};
+    world.player={0,0,0};world.targetPosition={5,0,5};
+    check(sightToTarget(world).inSector, "45 degree angle boundary is included");
+    rotateLook(world,-.1f);
+    check(!sightToTarget(world).inSector, "point just outside the angle boundary is excluded");
+    world=World{};
+    world.player=world.targetPosition;
+    sight=sightToTarget(world);
+    check(!sight.directionDefined && !sight.inSector && !lookAtTarget(world), "coincident player and flag have no direction");
+    world=World{};
+    rotateLook(world,90);
+    check(near(world.forward.x,1) && near(world.forward.z,0), "look rotates independently around Y");
+    world=World{};
+    updatePlayer(world,1,0,.5f);
+    check(near(world.forward.x,0) && near(world.forward.z,1), "independent look survives sideways movement");
+    world.followMovement=true;
+    updatePlayer(world,1,0,.5f);
+    check(near(world.forward.x,1) && near(world.forward.z,0), "optional look follows movement");
+    Target target;
+    check(target.getHealth()==100 && target.isAlive(), "target starts alive with 100 health");
+    target.takeDamage(35);
+    check(target.getHealth()==65 && target.isAlive(), "35 damage leaves 65 health");
+    target.takeDamage(80);
+    check(target.getHealth()==0 && !target.isAlive(), "35 then 80 clamps health at zero");
+    target.takeDamage(25);
+    check(target.getHealth()==0 && !target.isAlive(), "destroyed target stays at zero");
+    Target untouched;
+    untouched.takeDamage(0);
+    untouched.takeDamage(-50);
+    check(untouched.getHealth()==100, "nonpositive damage cannot heal or hurt");
+    Target first,second;
+    first.takeDamage(35);
+    check(first.getHealth()==65 && second.getHealth()==100, "instances keep independent state");
+    const Target readOnly=first;
+    check(readOnly.getHealth()==65 && readOnly.isAlive(), "const getters work on a const object");
+    world=World{};
+    shoot(world);
+    check(world.target.getHealth()==65 && world.lastAppliedDamage==35 && world.lastShotResult==1,
+          "shot inside view sector applies selected damage");
+    world.shotDamage=80;
+    shoot(world);
+    check(world.target.getHealth()==0 && world.lastAppliedDamage==65 && !world.target.isAlive(),
+          "lethal shot records actual health lost");
+    shoot(world);
+    check(world.target.getHealth()==0 && world.lastShotResult==3 && world.lastAppliedDamage==0,
+          "shot at destroyed target does not apply more damage");
+    restoreTarget(world);
+    check(world.target.getHealth()==100 && world.target.isAlive() && world.shotCount==0,
+          "restore creates a fresh target object");
+    rotateLook(world,180);
+    shoot(world);
+    check(world.target.getHealth()==100 && world.lastShotResult==2, "shot outside angle causes no damage");
+    lookAtTarget(world);
+    world.viewDistance=4;
+    shoot(world);
+    check(world.target.getHealth()==100 && world.lastShotResult==2, "shot outside range causes no damage");
+    std::cout << count - failed << '/' << count << " checks passed\n";
+    return failed ? 1 : 0;
+}

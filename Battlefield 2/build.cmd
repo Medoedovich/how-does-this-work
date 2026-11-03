@@ -7,5 +7,8 @@ if errorlevel 1 exit /b 1
 echo Building lesson 02...
 call "%~dp0Урок 02 — Dot и поле зрения\build.cmd"
 if errorlevel 1 exit /b 1
-echo Both lessons built and checked successfully.
+echo Building lesson 03...
+call "%~dp0Урок 03 — Классы, здоровье и урон\build.cmd"
+if errorlevel 1 exit /b 1
+echo All lessons built and checked successfully.
 exit /b 0
